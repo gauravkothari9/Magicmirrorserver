@@ -25,6 +25,10 @@ const submissionLimiter = rateLimit({
   message: { error: 'Too many submissions from this address. Please try again later.' },
 });
 
+app.get('/', (_req, res) => {
+  res.send('AURA Mirror API is running...');
+});
+
 app.use('/api', submissionLimiter, submissionsRouter);
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
