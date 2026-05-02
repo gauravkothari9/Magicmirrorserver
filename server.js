@@ -8,7 +8,7 @@ import submissionsRouter from './routes/submissions.js';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/aura-mirror';
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
@@ -26,17 +26,41 @@ const submissionLimiter = rateLimit({
 });
 
 app.use('/api', submissionLimiter, submissionsRouter);
-
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// Connect & start
-mongoose
-  .connect(MONGODB_URI)
-  .then(() => {
-    console.log('✓ MongoDB connected');
-    app.listen(PORT, () => console.log(`✓ AURA API listening on :${PORT}`));
-  })
-  .catch((err) => {
+// ─── MongoDB connection (cached for serverless) ──────────────
+// Vercel spins up a new function instance per request, so we cache
+// the Mongoose connection on the global object to avoid reconnecting
+// on every invocation (cold-start optimisation).
+let isConnected = false;
+
+async function connectDB() {
+  if (isConnected) return;
+  await mongoose.connect(MONGODB_URI);
+  isConnected = true;
+  console.log('✓ MongoDB connected');
+}
+
+// Ensure DB is connected before every request
+app.use(async (_req, _res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
     console.error('✗ MongoDB connection failed:', err.message);
-    process.exit(1);
-  });
+    next(err);
+  }
+});
+
+// ─── Local dev: start the HTTP server ───────────────────────
+// On Vercel, this block is never reached — Vercel handles the
+// HTTP layer and calls the exported `app` directly.
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  connectDB()
+    .then(() => app.listen(PORT, () => console.log(`✓ AURA API listening on :${PORT}`)))
+    .catch((err) => { console.error(err); process.exit(1); });
+}
+
+// ─── Export for Vercel serverless ───────────────────────────
+export default app;
